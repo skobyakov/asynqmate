@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -14,31 +12,44 @@ func main() {
 	am := NewAsynqMate("127.0.0.1:6379")
 	defer am.Close()
 
-	list := tview.NewList()
-	res, err := am.SearchForTask(ctx, TaskStatePending, "without")
+	queues, err := am.ListAllQueuesNames(ctx)
 	if err != nil {
 		panic(err)
 	}
 
-	items, ok := res.([]interface{})
-	if !ok {
-		panic("unexpected type")
+	tasks, err := am.SearchForTasks(ctx, TaskStatePending, "with")
+	if err != nil {
+		panic(err)
 	}
 
-	for _, item := range items {
-		list.AddItem(fmt.Sprintf("%v", item), "", 0, nil)
+	pages := tview.NewPages()
+
+	queuesList := tview.NewList().ShowSecondaryText(false)
+	queuesList.SetSelectedFunc(func(i int, s1, s2 string, r rune) {
+		pages.SwitchToPage("tasks")
+	})
+
+	tasksList := tview.NewList()
+	tasksList.SetDoneFunc(func() {
+		pages.SwitchToPage("queues")
+	})
+
+	pages.SetBorder(true).SetTitle("asynqmate").SetBorderPadding(1, 1, 1, 1)
+	pages.AddPage("queues", queuesList, true, true)
+	pages.AddPage("tasks", tasksList, true, false)
+
+	for _, q := range queues {
+		queuesList.AddItem(q, "", 0, nil)
+	}
+
+	for _, t := range tasks {
+		tasksList.AddItem(t.ID, t.Msg, 0, nil)
 	}
 
 	app := tview.NewApplication()
-	frame := tview.NewFrame(list).
-		SetBorders(1, 2, 2, 2, 4, 4).
-		AddText("Header left", true, tview.AlignLeft, tcell.ColorWhite).
-		AddText("Header middle", true, tview.AlignCenter, tcell.ColorWhite).
-		AddText("Header right", true, tview.AlignRight, tcell.ColorWhite).
-		AddText("Header second middle", true, tview.AlignCenter, tcell.ColorRed).
-		AddText("Footer middle", false, tview.AlignCenter, tcell.ColorGreen).
-		AddText("Footer second middle", false, tview.AlignCenter, tcell.ColorGreen)
-	if err := app.SetRoot(frame, true).SetFocus(frame).Run(); err != nil {
+	app.SetRoot(pages, true)
+
+	if err := app.Run(); err != nil {
 		panic(err)
 	}
 }

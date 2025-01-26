@@ -2,11 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/redis/go-redis/v9"
 )
 
 type TaskState string
+
+type Task struct {
+	ID  string
+	Msg string
+}
 
 const (
 	queuesKey = "asynq:queues"
@@ -51,13 +57,32 @@ func (am *AsynqMate) ListAllQueuesNames(ctx context.Context) ([]string, error) {
 	return am.rc.SMembers(ctx, queuesKey).Result()
 }
 
-func (am *AsynqMate) SearchForTask(ctx context.Context, state TaskState, msg string) (any, error) {
+func (am *AsynqMate) SearchForTasks(ctx context.Context, state TaskState, msg string) ([]*Task, error) {
 	res, err := searchTasksByStateCmd.Run(ctx, am.rc, []string{}, []interface{}{string(state), msg}).Result()
 	if err != nil {
 		return nil, err
 	}
 
-	return res, nil
+	items, ok := res.([]interface{})
+	if !ok {
+		return nil, errors.New("can't cast Redis response")
+	}
+
+	tasks := make([]*Task, 0, len(items))
+	for i, it := range items {
+		t, ok := it.(string)
+		if !ok {
+			return nil, errors.New("can't cast Redis response")
+		}
+
+		if i%2 == 0 {
+			tasks = append(tasks, &Task{ID: t})
+		} else {
+			tasks[len(tasks)-1].Msg = t
+		}
+	}
+
+	return tasks, nil
 }
 
 func (am *AsynqMate) Close() {
